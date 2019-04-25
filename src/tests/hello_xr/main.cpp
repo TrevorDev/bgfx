@@ -5,6 +5,12 @@
 #include "graphicsplugin.h"
 #include "openxr_program.h"
 
+#include <bx/bx.h>
+#include <bx/file.h>
+#include <bx/sort.h>
+#include "bgfx\bgfx.h"
+#include "bgfx\platform.h"
+
 namespace {
 
 void ShowHelp() {
@@ -65,6 +71,7 @@ bool UpdateOptionsFromCommandLine(Options& options, int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
     try {
+        //bgfx::renderFrame();
         // Parse command-line arguments into Options.
         std::shared_ptr<Options> options = std::make_shared<Options>();
         if (!UpdateOptionsFromCommandLine(*options, argc, argv)) {
