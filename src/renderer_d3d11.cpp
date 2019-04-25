@@ -885,7 +885,7 @@ namespace bgfx { namespace d3d11
 				for (;;)
 				{
 					uint32_t flags = 0
-						| D3D11_CREATE_DEVICE_SINGLETHREADED
+						
 						| D3D11_CREATE_DEVICE_BGRA_SUPPORT
 //						| D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS
 						| (_init.debug ? D3D11_CREATE_DEVICE_DEBUG : 0)
@@ -4443,7 +4443,7 @@ namespace bgfx { namespace d3d11
 
 	void TextureD3D11::destroy()
 	{
-		m_dar.destroy();
+		/*m_dar.destroy();
 
 		s_renderD3D11->m_srvUavLru.invalidateWithParent(getHandle().idx);
 		DX_RELEASE(m_rt, 0);
@@ -4452,7 +4452,7 @@ namespace bgfx { namespace d3d11
 		if (0 == (m_flags & BGFX_SAMPLER_INTERNAL_SHARED) )
 		{
 			DX_RELEASE(m_ptr, 0);
-		}
+		}*/
 	}
 
 	void TextureD3D11::overrideInternal(uintptr_t _ptr)
@@ -4461,7 +4461,14 @@ namespace bgfx { namespace d3d11
 		m_flags |= BGFX_SAMPLER_INTERNAL_SHARED;
 		m_ptr = (ID3D11Resource*)_ptr;
 
-		s_renderD3D11->m_device->CreateShaderResourceView(m_ptr, NULL, &m_srv);
+		D3D11_SHADER_RESOURCE_VIEW_DESC desc;
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		desc.Texture2D.MostDetailedMip = 0;
+		desc.Texture2D.MipLevels = 1;
+
+
+		s_renderD3D11->m_device->CreateShaderResourceView(m_ptr, &desc, &m_srv);
 	}
 
 	void TextureD3D11::update(uint8_t _side, uint8_t _mip, const Rect& _rect, uint16_t _z, uint16_t _depth, uint16_t _pitch, const Memory* _mem)
@@ -4867,7 +4874,13 @@ namespace bgfx { namespace d3d11
 							break;
 						}
 
-						DX_CHECK(s_renderD3D11->m_device->CreateShaderResourceView(texture.m_ptr, NULL, &m_srv[m_num]) );
+						D3D11_SHADER_RESOURCE_VIEW_DESC descA;
+						descA.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+						descA.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+						descA.Texture2D.MostDetailedMip = 0;
+						descA.Texture2D.MipLevels = 1;
+
+						DX_CHECK(s_renderD3D11->m_device->CreateShaderResourceView(texture.m_ptr, &descA, &m_srv[m_num]) );
 						m_num++;
 					}
 					else
