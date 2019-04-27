@@ -9,6 +9,8 @@
 #include "geometry.h"
 #include "graphicsplugin.h"
 
+#include <unordered_map>
+
 #ifdef XR_USE_GRAPHICS_API_D3D11
 
 #include <common/xr_linear.h>
@@ -302,27 +304,12 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
         // Set view 0 clear state.
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
 
-        // DX
-        //const ComPtr<IDXGIAdapter1> adapter = GetAdapter(graphicsRequirements.adapterLuid);
-
-        //// Create a list of feature levels which are both supported by the OpenXR runtime and this application.
-        //std::vector<D3D_FEATURE_LEVEL> featureLevels = {D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_12_0, D3D_FEATURE_LEVEL_11_1,
-        //                                                D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
-        //featureLevels.erase(std::remove_if(featureLevels.begin(), featureLevels.end(),
-        //                                   [&](D3D_FEATURE_LEVEL fl) { return fl < graphicsRequirements.minFeatureLevel; }),
-        //                    featureLevels.end());
-        //CHECK_MSG(featureLevels.size() != 0, "Unsupported minimum feature level!");
-
-        //InitializeD3D11DeviceForAdapter(adapter.Get(), featureLevels, m_device.ReleaseAndGetAddressOf(),
-        //                                m_deviceContext.ReleaseAndGetAddressOf());
 
         InitializeResources();
 
 		auto intern = bgfx::getInternalData();
         
 		m_graphicsBinding.device = (ID3D11Device*)intern->context;
-
-        //m_graphicsBinding.device = m_device.Get();
     }
 
     void InitializeResources() {
@@ -370,42 +357,11 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
             fsh = loadShader(s_fileReader, _fsName);
         }
 
-        bgfx::createProgram(vsh, fsh, true /* destroy shaders when program is destroyed */);
+        m_program = bgfx::createProgram(vsh, fsh, true /* destroy shaders when program is destroyed */);
         // m_program = loadProgram("vs_cubes", "fs_cubes");
 
         // m_timeOffset = bx::getHPCounter();
 
-        // DX
-     /*   const ComPtr<ID3DBlob> vertexShaderBytes = CompileShader(ShaderHlsl, "MainVS", "vs_5_0");
-        CHECK_HRCMD(m_device->CreateVertexShader(vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), nullptr,
-                                                 m_vertexShader.ReleaseAndGetAddressOf()));
-
-        const ComPtr<ID3DBlob> pixelShaderBytes = CompileShader(ShaderHlsl, "MainPS", "ps_5_0");
-        CHECK_HRCMD(m_device->CreatePixelShader(pixelShaderBytes->GetBufferPointer(), pixelShaderBytes->GetBufferSize(), nullptr,
-                                                m_pixelShader.ReleaseAndGetAddressOf()));
-
-        const D3D11_INPUT_ELEMENT_DESC vertexDesc[] = {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
-            {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        };
-
-        CHECK_HRCMD(m_device->CreateInputLayout(vertexDesc, (UINT)ArraySize(vertexDesc), vertexShaderBytes->GetBufferPointer(),
-                                                vertexShaderBytes->GetBufferSize(), &m_inputLayout));
-
-        const CD3D11_BUFFER_DESC modelConstantBufferDesc(sizeof(ModelConstantBuffer), D3D11_BIND_CONSTANT_BUFFER);
-        CHECK_HRCMD(m_device->CreateBuffer(&modelConstantBufferDesc, nullptr, m_modelCBuffer.ReleaseAndGetAddressOf()));
-
-        const CD3D11_BUFFER_DESC viewProjectionConstantBufferDesc(sizeof(ViewProjectionConstantBuffer), D3D11_BIND_CONSTANT_BUFFER);
-        CHECK_HRCMD(
-            m_device->CreateBuffer(&viewProjectionConstantBufferDesc, nullptr, m_viewProjectionCBuffer.ReleaseAndGetAddressOf()));
-
-        const D3D11_SUBRESOURCE_DATA vertexBufferData{Geometry::c_cubeVertices};
-        const CD3D11_BUFFER_DESC vertexBufferDesc(sizeof(Geometry::c_cubeVertices), D3D11_BIND_VERTEX_BUFFER);
-        CHECK_HRCMD(m_device->CreateBuffer(&vertexBufferDesc, &vertexBufferData, m_cubeVertexBuffer.ReleaseAndGetAddressOf()));
-
-        const D3D11_SUBRESOURCE_DATA indexBufferData{Geometry::c_cubeIndices};
-        const CD3D11_BUFFER_DESC indexBufferDesc(sizeof(Geometry::c_cubeIndices), D3D11_BIND_INDEX_BUFFER);
-        CHECK_HRCMD(m_device->CreateBuffer(&indexBufferDesc, &indexBufferData, m_cubeIndexBuffer.ReleaseAndGetAddressOf()));*/
     }
 
     int64_t SelectColorSwapchainFormat(const std::vector<int64_t>& runtimeFormats) const override {
@@ -423,7 +379,7 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
         if (swapchainFormatIt == std::end(SupportedColorSwapchainFormats)) {
             THROW("No runtime swapchain format supported for color swapchain");
         }
-        std::cout << (*swapchainFormatIt) << "IS THE \n";
+
         return *swapchainFormatIt;
     }
 
@@ -437,7 +393,6 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
         // Return back an array of pointers to each swapchain image struct so the consumer doesn't need to know the type/size.
         std::vector<XrSwapchainImageD3D11KHR> swapchainImageBuffer(capacity);
         std::vector<XrSwapchainImageBaseHeader*> swapchainImageBase;
-
         for (XrSwapchainImageD3D11KHR& image : swapchainImageBuffer) {
             image.type = XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR;
             swapchainImageBase.push_back(reinterpret_cast<XrSwapchainImageBaseHeader*>(&image));
@@ -479,12 +434,13 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
 
     //    return depthStencilView;
     //}
+    uint16_t counter = 0;
 
     void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
                     int64_t swapchainFormat, const std::vector<Cube>& cubes) override {
         auto x = swapchainFormat || cubes.size();
         if (x) {
-            std::cout << "tmp\n";
+            //std::cout << "tmp\n";
 		}
 
         // Shared
@@ -492,104 +448,136 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
         ID3D11Texture2D* const colorTexture = reinterpret_cast<const XrSwapchainImageD3D11KHR*>(swapchainImage)->texture;
 
         // BGFX
-        // bgfx::TextureHandle textures[2] =
-        // bgfx::createTexture2D()
-        // bgfx::Attachment at;
+        counter++;
         bgfx::ViewId view = 0;
         bgfx::setViewName(view, "standard view");
-        bgfx::setViewRect(view, (uint16_t)layerView.subImage.imageRect.offset.x, (uint16_t)layerView.subImage.imageRect.offset.y,
-                          (uint16_t)layerView.subImage.imageRect.extent.width,
-                          (uint16_t)layerView.subImage.imageRect.extent.height);
-        bgfx::setViewClear(view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0xff3030ff, 1.0f, 0);
+        bgfx::setViewRect(view, (uint16_t)layerView.subImage.imageRect.offset.x, (uint16_t)layerView.subImage.imageRect.offset.y, (uint16_t)layerView.subImage.imageRect.extent.width, (uint16_t)layerView.subImage.imageRect.extent.height);
+        bgfx::setViewClear(view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, counter < 500 ? 0xff3030ff : 0xff30FFff, 1.0f, 0);
+        std::cout <<  counter << "\n";
 
-        // auto t = bgfx::createTexture2D(1, 1, false, 1, bgfx::TextureFormat::BGRA8);
-        // bgfx::TextureHandle textureHandle;
-
-        // bgfx::gl::
-        // bgfx::setViewFrameBuffer(view, frameBuffer);
-
-        // DX
-        //auto i = false;
-        //if (i) {
-        //    CD3D11_VIEWPORT viewport((float)layerView.subImage.imageRect.offset.x, (float)layerView.subImage.imageRect.offset.y,
-        //                             (float)layerView.subImage.imageRect.extent.width,
-        //                             (float)layerView.subImage.imageRect.extent.height);
-        //    m_deviceContext->RSSetViewports(1, &viewport);
-
-        //    // Create RenderTargetView with original swapchain format (swapchain is typeless).
-        //    ComPtr<ID3D11RenderTargetView> renderTargetView;
-        //    const CD3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc(D3D11_RTV_DIMENSION_TEXTURE2D, (DXGI_FORMAT)swapchainFormat);
-        //    CHECK_HRCMD(
-        //        m_device->CreateRenderTargetView(colorTexture, &renderTargetViewDesc, renderTargetView.ReleaseAndGetAddressOf()));
-
-        //    const ComPtr<ID3D11DepthStencilView> depthStencilView = GetDepthStencilView(colorTexture);
-
-        //    // Clear swapchain and depth buffer. NOTE: This will clear the entire render target view, not just the specified
-        //    // view.
-        //    // TODO: Do not clear to a color when using a pass-through view configuration.
-        //    m_deviceContext->ClearRenderTargetView(renderTargetView.Get(), DirectX::Colors::DarkSlateGray);
-        //    m_deviceContext->ClearDepthStencilView(depthStencilView.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
-
-        //    ID3D11RenderTargetView* renderTargets[] = {renderTargetView.Get()};
-        //    m_deviceContext->OMSetRenderTargets((UINT)ArraySize(renderTargets), renderTargets, depthStencilView.Get());
-
-        //    const XMMATRIX spaceToView = XMMatrixInverse(nullptr, LoadXrPose(layerView.pose));
-        //    XrMatrix4x4f projectionMatrix;
-        //    XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerView.fov, 0.05f, 100.0f);
-
-        //    // Set shaders and constant buffers.
-        //    ViewProjectionConstantBuffer viewProjection;
-        //    XMStoreFloat4x4(&viewProjection.ViewProjection, XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
-        //    m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjection, 0, 0);
-
-        //    ID3D11Buffer* const constantBuffers[] = {m_modelCBuffer.Get(), m_viewProjectionCBuffer.Get()};
-        //    m_deviceContext->VSSetConstantBuffers(0, (UINT)ArraySize(constantBuffers), constantBuffers);
-        //    m_deviceContext->VSSetShader(m_vertexShader.Get(), nullptr, 0);
-        //    m_deviceContext->PSSetShader(m_pixelShader.Get(), nullptr, 0);
-
-        //    // Set cube primitive data.
-        //    const UINT strides[] = {sizeof(Geometry::Vertex)};
-        //    const UINT offsets[] = {0};
-        //    ID3D11Buffer* vertexBuffers[] = {m_cubeVertexBuffer.Get()};
-        //    m_deviceContext->IASetVertexBuffers(0, (UINT)ArraySize(vertexBuffers), vertexBuffers, strides, offsets);
-        //    m_deviceContext->IASetIndexBuffer(m_cubeIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-        //    m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        //    m_deviceContext->IASetInputLayout(m_inputLayout.Get());
-
-        //    // Render each cube
-        //    for (const Cube& cube : cubes) {
-        //        // Compute and update the model transform.
-        //        ModelConstantBuffer model;
-        //        XMStoreFloat4x4(&model.Model, XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) *
-        //                                                        LoadXrPose(cube.Pose)));
-        //        m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
-
-        //        // Draw the cube.
-        //        m_deviceContext->DrawIndexed((UINT)ArraySize(Geometry::c_cubeIndices), 0, 0);
-        //    }
-        //}
-
-        std::cout << "Render\n";
-        if (!started){
+        
+        auto frameId = (uintptr_t)colorTexture;
+        if (textures.find(frameId) == textures.end()) {
             D3D11_TEXTURE2D_DESC colorDesc;
             colorTexture->GetDesc(&colorDesc);
 
-            _textures[0] =
-                bgfx::createTexture2D((uint16_t)colorDesc.Width, (uint16_t)colorDesc.Height, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_RT);
-           
-            started = true;
+			textures.insert(std::make_pair(
+                frameId,
+                bgfx::createTexture2D((uint16_t)1, (uint16_t)1, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_RT)));	
+		
+			
+
+            std::cout << "New frame added \n";
+            
 		}
-		 bgfx::overrideInternal(_textures[0], (uintptr_t)colorTexture);
-            bgfx::FrameBufferHandle frameBuffer = bgfx::createFrameBuffer(1, _textures);
-            bgfx::setViewFrameBuffer(view, frameBuffer);
-            bgfx::touch(view);
-            bgfx::frame();
+
+		 bgfx::overrideInternal(textures.at(frameId), (uintptr_t)colorTexture);
+		 if (framebuffers.find(frameId) != framebuffers.end()) {
+            auto fb = framebuffers.at(frameId);
+            bgfx::destroy(fb);
+		}
+        
+        framebuffers.erase(frameId);
+        framebuffers.insert(std::make_pair(frameId, bgfx::createFrameBuffer(1, &textures.at(frameId))));
+        
+      /*  bgfx::overrideInternal(textures.at(frameId), (uintptr_t)colorTexture);
+
+            framebuffers.erase(frameId);
+            framebuffers.insert(std::make_pair(frameId, bgfx::createFrameBuffer(1, &textures.at(frameId))));*/
+
+        bgfx::FrameBufferHandle frameBuffer = framebuffers.at(frameId);
+
+		auto q = bx::Quaternion();
+        q.x = layerView.pose.orientation.x;
+        q.y = layerView.pose.orientation.y;
+        q.z = layerView.pose.orientation.z;
+		q.w = layerView.pose.orientation.w;
+
+		
+		//layerView.pose.orientation.
+		const bx::Vec3 at = {0.0f, 0.0f, 1.0f};
+
+		//float(-counter)
+          
+         const bx::Vec3 eye = {layerView.pose.position.x, layerView.pose.position.y, layerView.pose.position.z};
+
+		 auto lookAt =  bx::add(eye, bx::mul(at, q));
+
+		float m_width = (float)layerView.subImage.imageRect.extent.width;
+        float m_height = (float)layerView.subImage.imageRect.extent.height;
+        // Set view and projection matrix for view 0.
+        {
+            //float viewMatA[16];
+            float viewMat[16];
+            //bx::mtxLookAt(viewMat, eye, lookAt);
+            bx::mtxQuatTranslation(viewMat, q, eye);
+            
+           // bx::mtxInverse(viewMat, viewMatA);
+
+            float proj[16];
+            bx::mtxProj(proj, 60.0f, float(m_width) / float(m_height), 0.1f, 1000.0f, bgfx::getCaps()->homogeneousDepth);
+
+			XrMatrix4x4f projectionMatrix;
+            XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerView.fov, 0.05f, 100.0f);
+                        for (uint16_t j = 0; j < 16; j++) {
+                proj[j] = projectionMatrix.m[j];
+						}
+
+
+            bgfx::setViewTransform(view, viewMat, proj);
+
+            // Set view 0 default viewport.
+            //bgfx::setViewRect(view, 0, 0, uint16_t(m_width), uint16_t(m_height));
+        }
+
+        bgfx::setViewFrameBuffer(view, frameBuffer);
+        bgfx::touch(view);
+
+		m_pt = 2;
+		bgfx::IndexBufferHandle ibh = m_ibh[m_pt];
+		uint64_t state = 0
+			| (m_r ? BGFX_STATE_WRITE_R : 0)
+			| (m_g ? BGFX_STATE_WRITE_G : 0)
+			| (m_b ? BGFX_STATE_WRITE_B : 0)
+			| (m_a ? BGFX_STATE_WRITE_A : 0)
+			| BGFX_STATE_WRITE_Z
+			| BGFX_STATE_DEPTH_TEST_LESS
+			| BGFX_STATE_CULL_CW
+			| BGFX_STATE_MSAA
+			| s_ptState[m_pt]
+			;
+
+		// Submit 11x11 cubes.
+		for (uint32_t yy = 0; yy < 11; ++yy)
+		{
+			for (uint32_t xx = 0; xx < 11; ++xx)
+			{
+				float mtx[16];
+				bx::mtxRotateXY(mtx, 0, 0);
+				mtx[12] = -15.0f + float(xx)*3.0f;
+				mtx[13] = -15.0f + float(yy)*3.0f;
+				mtx[14] = 0.0f;
+
+				// Set model matrix for rendering.
+				bgfx::setTransform(mtx);
+
+				// Set vertex and index buffer.
+				bgfx::setVertexBuffer(0, m_vbh);
+				bgfx::setIndexBuffer(ibh);
+
+				// Set render states.
+				bgfx::setState(state);
+
+				// Submit primitive for rendering to view 0.
+				bgfx::submit(0, m_program);
+			}
+		}
+
+        bgfx::frame();
 		
         
     }
 
-    bgfx::TextureHandle _textures[1];
-    bool started = false;
 
    private:
     // BGFX
@@ -601,6 +589,9 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
     int64_t m_timeOffset;
     int32_t m_pt;
 
+	std::unordered_map<uintptr_t, bgfx::FrameBufferHandle> framebuffers; 
+	std::unordered_map<uintptr_t, bgfx::TextureHandle> textures; 
+
     bool m_r;
     bool m_g;
     bool m_b;
@@ -610,16 +601,7 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
     std::list<std::vector<XrSwapchainImageD3D11KHR>> m_swapchainImageBuffers;
 
     // DX
-    ComPtr<ID3D11Device> m_device;
-    ComPtr<ID3D11DeviceContext> m_deviceContext;
     XrGraphicsBindingD3D11KHR m_graphicsBinding{XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
-    ComPtr<ID3D11VertexShader> m_vertexShader;
-    ComPtr<ID3D11PixelShader> m_pixelShader;
-    ComPtr<ID3D11InputLayout> m_inputLayout;
-    ComPtr<ID3D11Buffer> m_modelCBuffer;
-    ComPtr<ID3D11Buffer> m_viewProjectionCBuffer;
-    ComPtr<ID3D11Buffer> m_cubeVertexBuffer;
-    ComPtr<ID3D11Buffer> m_cubeIndexBuffer;
 
     // Map color buffer to associated depth buffer. This map is populated on demand.
     std::map<ID3D11Texture2D*, ComPtr<ID3D11DepthStencilView>> m_colorToDepthMap;
