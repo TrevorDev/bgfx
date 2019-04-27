@@ -885,7 +885,8 @@ namespace bgfx { namespace d3d11
 				for (;;)
 				{
 					uint32_t flags = 0
-						
+						// TODO add this back once updating to openXR sdk with fix that supports this 
+						// | D3D11_CREATE_DEVICE_SINGLETHREADED
 						| D3D11_CREATE_DEVICE_BGRA_SUPPORT
 //						| D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS
 						| (_init.debug ? D3D11_CREATE_DEVICE_DEBUG : 0)
@@ -4443,7 +4444,7 @@ namespace bgfx { namespace d3d11
 
 	void TextureD3D11::destroy()
 	{
-		/*m_dar.destroy();
+		m_dar.destroy();
 
 		s_renderD3D11->m_srvUavLru.invalidateWithParent(getHandle().idx);
 		DX_RELEASE(m_rt, 0);
@@ -4452,7 +4453,7 @@ namespace bgfx { namespace d3d11
 		if (0 == (m_flags & BGFX_SAMPLER_INTERNAL_SHARED) )
 		{
 			DX_RELEASE(m_ptr, 0);
-		}*/
+		}
 	}
 
 	void TextureD3D11::overrideInternal(uintptr_t _ptr)
@@ -4461,6 +4462,7 @@ namespace bgfx { namespace d3d11
 		m_flags |= BGFX_SAMPLER_INTERNAL_SHARED;
 		m_ptr = (ID3D11Resource*)_ptr;
 
+		// TODO this block is needed because using null desc is not supported for non-typed textures which openXR provides
 		D3D11_SHADER_RESOURCE_VIEW_DESC desc;
 		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
@@ -4874,6 +4876,7 @@ namespace bgfx { namespace d3d11
 							break;
 						}
 
+						// TODO this block is needed because using null desc is not supported for non-typed textures which openXR provides
 						D3D11_SHADER_RESOURCE_VIEW_DESC descA;
 						descA.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 						descA.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
