@@ -471,9 +471,11 @@ struct D3D11GraphicsPlugin : public IGraphicsPlugin {
             
 		}
 
+		
 		 bgfx::overrideInternal(textures.at(frameId), (uintptr_t)colorTexture);
 		 if (framebuffers.find(frameId) != framebuffers.end()) {
             auto fb = framebuffers.at(frameId);
+                     // TODO: this is weird that I need to delete the framebuffer every frame and create a new one
             bgfx::destroy(fb);
 		}
         

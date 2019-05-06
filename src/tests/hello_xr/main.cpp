@@ -4,6 +4,7 @@
 #include "platformplugin.h"
 #include "graphicsplugin.h"
 #include "openxr_program.h"
+#include "openXRLib.cpp"
 
 namespace {
 
@@ -64,54 +65,75 @@ bool UpdateOptionsFromCommandLine(Options& options, int argc, char* argv[]) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    
     try {
-        // Parse command-line arguments into Options.
-        std::shared_ptr<Options> options = std::make_shared<Options>();
-        if (!UpdateOptionsFromCommandLine(*options, argc, argv)) {
-            return 1;
-        }
+        int mode = 0;
+        if (mode == 0) {
 
-        // Spawn a thread to wait for a keypress
-        static bool quitKeyPressed = false;
-        auto exitPollingThread = std::thread{[] {
-            Log::Write(Log::Level::Info, "Press any key to shutdown...");
-            getchar();
-            quitKeyPressed = true;
-        }};
-        exitPollingThread.detach();
+			// Initialize xr
+			auto xr = OpenXRLib();
+            xr.init();
 
-        bool requestRestart = false;
-        do {
-            // Create platform-specific implementation.
-            std::shared_ptr<IPlatformPlugin> platformPlugin = CreatePlatformPlugin(options);
+			// Initialize graphics device that is compatable with xr
+			/*BGFXAppDX11 bgfxApp;
+            bgfxApp.initDevice(xr.m_instance, xr.m_systemId);*/
+            xr.initDevice();
 
-            // Create graphics API implementation.
-            std::shared_ptr<IGraphicsPlugin> graphicsPlugin = CreateGraphicsPlugin(options, platformPlugin);
+			// Start an xr session for this device
+			xr.initializeSession();
 
-            // Initialize the OpenXR program.
-            std::shared_ptr<IOpenXrProgram> program = CreateOpenXrProgram(options, platformPlugin, graphicsPlugin);
-
-            program->CreateInstance();
-            program->InitializeSystem();
-            program->InitializeSession();
-            program->CreateSwapchains();
-
-            while (!quitKeyPressed) {
-                bool exitRenderLoop = false;
-                program->PollEvents(&exitRenderLoop, &requestRestart);
-                if (exitRenderLoop) {
-                    break;
-                }
-
-                if (program->IsSessionRunning()) {
-                    program->RenderFrame();
-                } else {
-                    // Throttle loop since xrWaitFrame won't be called.
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                }
+			OutputDebugStringA("DONE!");
+            std::cin.get();
+        } else {
+            // Parse command-line arguments into Options.
+            std::shared_ptr<Options> options = std::make_shared<Options>();
+            if (!UpdateOptionsFromCommandLine(*options, argc, argv)) {
+                return 1;
             }
 
-        } while (!quitKeyPressed && requestRestart);
+            // Spawn a thread to wait for a keypress
+            static bool quitKeyPressed = false;
+            auto exitPollingThread = std::thread{[] {
+                Log::Write(Log::Level::Info, "Press any key to shutdown...");
+                getchar();
+                quitKeyPressed = true;
+            }};
+            exitPollingThread.detach();
+
+            bool requestRestart = false;
+            do {
+                // Create platform-specific implementation.
+                std::shared_ptr<IPlatformPlugin> platformPlugin = CreatePlatformPlugin(options);
+
+                // Create graphics API implementation.
+                std::shared_ptr<IGraphicsPlugin> graphicsPlugin = CreateGraphicsPlugin(options, platformPlugin);
+
+                // Initialize the OpenXR program.
+                std::shared_ptr<IOpenXrProgram> program = CreateOpenXrProgram(options, platformPlugin, graphicsPlugin);
+
+                program->CreateInstance();
+                program->InitializeSystem();
+                program->InitializeSession();
+                program->CreateSwapchains();
+
+                while (!quitKeyPressed) {
+                    bool exitRenderLoop = false;
+                    program->PollEvents(&exitRenderLoop, &requestRestart);
+                    if (exitRenderLoop) {
+                        break;
+                    }
+
+                    if (program->IsSessionRunning()) {
+                        program->RenderFrame();
+                    } else {
+                        // Throttle loop since xrWaitFrame won't be called.
+                        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    }
+                }
+
+            } while (!quitKeyPressed && requestRestart);
+        }
+        
 
         return 0;
     } catch (const std::exception& ex) {
