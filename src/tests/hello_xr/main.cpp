@@ -73,14 +73,23 @@ int main(int argc, char* argv[]) {
 			// Initialize xr
 			auto xr = OpenXRLib();
             xr.init();
-
-			// Initialize graphics device that is compatable with xr
-			/*BGFXAppDX11 bgfxApp;
-            bgfxApp.initDevice(xr.m_instance, xr.m_systemId);*/
-            xr.initDevice();
-
-			// Start an xr session for this device
+            xr.initGraphicsDevice();
 			xr.initializeSession();
+            xr.createSwapchains();
+
+			bool exit = false;
+            bool restart = false;
+			while (1) {
+                xr.pollEvents(&exit, &restart);
+                if (xr.isSessionRunning()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+					//xr.renderFrame();
+                } else {
+                    // Throttle loop since xrWaitFrame won't be called.
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                }
+                OutputDebugStringA("new frame!");
+			}
 
 			OutputDebugStringA("DONE!");
             std::cin.get();
