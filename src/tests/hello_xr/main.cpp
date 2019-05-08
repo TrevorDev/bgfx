@@ -82,8 +82,8 @@ int main(int argc, char* argv[]) {
 			while (1) {
                 xr.pollEvents(&exit, &restart);
                 if (xr.isSessionRunning()) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-					//xr.renderFrame();
+                    //std::this_thread::sleep_for(std::chrono::milliseconds(250));
+					xr.renderFrame();
                 } else {
                     // Throttle loop since xrWaitFrame won't be called.
                     std::this_thread::sleep_for(std::chrono::milliseconds(250));

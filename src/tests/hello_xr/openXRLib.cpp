@@ -9,6 +9,7 @@
 #include <bx/sort.h>
 #include "bgfx\bgfx.h"
 #include "bgfx\platform.h"
+#include <unordered_map>
 
 struct Swapchain {
     XrSwapchain handle;
@@ -549,10 +550,132 @@ class OpenXRLib {
 
     void renderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
                     int64_t swapchainFormat) {
+        if (swapchainFormat) {
+        
+		}
+		// Shared
+        CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
+        ID3D11Texture2D* const colorTexture = reinterpret_cast<const XrSwapchainImageD3D11KHR*>(swapchainImage)->texture;
 
+        // BGFX
+        counter++;
+        bgfx::ViewId view = 0;
+        bgfx::setViewName(view, "standard view");
+        bgfx::setViewRect(view, (uint16_t)layerView.subImage.imageRect.offset.x, (uint16_t)layerView.subImage.imageRect.offset.y,
+                          (uint16_t)layerView.subImage.imageRect.extent.width,
+                          (uint16_t)layerView.subImage.imageRect.extent.height);
+        bgfx::setViewClear(view, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, counter < 500 ? 0xff3030ff : 0xff30FFff, 1.0f, 0);
+        std::cout << counter << "\n";
 
+        auto frameId = (uintptr_t)colorTexture;
+        if (textures.find(frameId) == textures.end()) {
+            D3D11_TEXTURE2D_DESC colorDesc;
+            colorTexture->GetDesc(&colorDesc);
+
+            textures.insert(std::make_pair(
+                frameId, bgfx::createTexture2D((uint16_t)1, (uint16_t)1, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_RT)));
+
+            std::cout << "New frame added \n";
+        }
+
+        bgfx::overrideInternal(textures.at(frameId), (uintptr_t)colorTexture);
+        if (framebuffers.find(frameId) != framebuffers.end()) {
+            auto fb = framebuffers.at(frameId);
+            // TODO: this is weird that I need to delete the framebuffer every frame and create a new one
+            bgfx::destroy(fb);
+        }
+
+        framebuffers.erase(frameId);
+        framebuffers.insert(std::make_pair(frameId, bgfx::createFrameBuffer(1, &textures.at(frameId))));
+
+        /*  bgfx::overrideInternal(textures.at(frameId), (uintptr_t)colorTexture);
+
+              framebuffers.erase(frameId);
+              framebuffers.insert(std::make_pair(frameId, bgfx::createFrameBuffer(1, &textures.at(frameId))));*/
+
+        bgfx::FrameBufferHandle frameBuffer = framebuffers.at(frameId);
+
+        auto q = bx::Quaternion();
+        q.x = layerView.pose.orientation.x;
+        q.y = layerView.pose.orientation.y;
+        q.z = layerView.pose.orientation.z;
+        q.w = layerView.pose.orientation.w;
+
+        // layerView.pose.orientation.
+        const bx::Vec3 at = {0.0f, 0.0f, 1.0f};
+
+        // float(-counter)
+
+        const bx::Vec3 eye = {layerView.pose.position.x, layerView.pose.position.y, layerView.pose.position.z};
+
+        auto lookAt = bx::add(eye, bx::mul(at, q));
+
+        float m_width = (float)layerView.subImage.imageRect.extent.width;
+        float m_height = (float)layerView.subImage.imageRect.extent.height;
+        // Set view and projection matrix for view 0.
+        {
+            // float viewMatA[16];
+            float viewMat[16];
+            // bx::mtxLookAt(viewMat, eye, lookAt);
+            bx::mtxQuatTranslation(viewMat, q, eye);
+
+            // bx::mtxInverse(viewMat, viewMatA);
+
+            float proj[16];
+            bx::mtxProj(proj, 60.0f, float(m_width) / float(m_height), 0.1f, 1000.0f, bgfx::getCaps()->homogeneousDepth);
+
+            XrMatrix4x4f projectionMatrix;
+            XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerView.fov, 0.05f, 100.0f);
+            for (uint16_t j = 0; j < 16; j++) {
+                proj[j] = projectionMatrix.m[j];
+            }
+
+            bgfx::setViewTransform(view, viewMat, proj);
+
+            // Set view 0 default viewport.
+            // bgfx::setViewRect(view, 0, 0, uint16_t(m_width), uint16_t(m_height));
+        }
+
+        bgfx::setViewFrameBuffer(view, frameBuffer);
+        bgfx::touch(view);
+
+        //m_pt = 2;
+        //bgfx::IndexBufferHandle ibh = m_ibh[m_pt];
+        //uint64_t state = 0 | (m_r ? BGFX_STATE_WRITE_R : 0) | (m_g ? BGFX_STATE_WRITE_G : 0) | (m_b ? BGFX_STATE_WRITE_B : 0) |
+        //                 (m_a ? BGFX_STATE_WRITE_A : 0) | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_CULL_CW |
+        //                 BGFX_STATE_MSAA | s_ptState[m_pt];
+
+        //// Submit 11x11 cubes.
+        //for (uint32_t yy = 0; yy < 11; ++yy) {
+        //    for (uint32_t xx = 0; xx < 11; ++xx) {
+        //        float mtx[16];
+        //        bx::mtxRotateXY(mtx, 0, 0);
+        //        mtx[12] = -15.0f + float(xx) * 3.0f;
+        //        mtx[13] = -15.0f + float(yy) * 3.0f;
+        //        mtx[14] = 0.0f;
+
+        //        // Set model matrix for rendering.
+        //        bgfx::setTransform(mtx);
+
+        //        // Set vertex and index buffer.
+        //        bgfx::setVertexBuffer(0, m_vbh);
+        //        bgfx::setIndexBuffer(ibh);
+
+        //        // Set render states.
+        //        bgfx::setState(state);
+
+        //        // Submit primitive for rendering to view 0.
+        //        bgfx::submit(0, m_program);
+        //    }
+        //}
+
+        bgfx::frame();
 	}
 
     XrGraphicsBindingD3D11KHR m_graphicsBinding{XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
     std::list<std::vector<XrSwapchainImageD3D11KHR>> m_swapchainImageBuffers;
+
+	std::unordered_map<uintptr_t, bgfx::FrameBufferHandle> framebuffers;
+    std::unordered_map<uintptr_t, bgfx::TextureHandle> textures;
+    uint16_t counter = 0;
 };
