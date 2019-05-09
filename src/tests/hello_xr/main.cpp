@@ -80,15 +80,24 @@ int main(int argc, char* argv[]) {
 			bool exit = false;
             bool restart = false;
 			while (1) {
-                xr.pollEvents(&exit, &restart);
-                if (xr.isSessionRunning()) {
-                    //std::this_thread::sleep_for(std::chrono::milliseconds(250));
-					xr.renderFrame();
-                } else {
-                    // Throttle loop since xrWaitFrame won't be called.
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                }
-                OutputDebugStringA("new frame!");
+				xr.pollEvents(&exit, &restart);
+					
+					
+				auto frame = xr.aquireFrame();
+				if (frame.shouldRender) {
+					for (uint16_t i = 0; i < frame.viewCountOutput; i++) {
+						xr.aquireImage(frame, i);
+                        xr.renderView(frame.projectionLayerViews[i], frame.images[i].image,  xr.m_colorSwapchainFormat);
+						xr.releaseImage(frame, i);
+					}
+
+					OutputDebugStringA("new frame!");
+				} else {
+					// Throttle loop since xrWaitFrame won't be called.
+					std::this_thread::sleep_for(std::chrono::milliseconds(250));
+				}
+				xr.submitFrame(std::move(frame));
+                
 			}
 
 			OutputDebugStringA("DONE!");

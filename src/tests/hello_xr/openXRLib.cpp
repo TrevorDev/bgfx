@@ -11,10 +11,28 @@
 #include "bgfx\platform.h"
 #include <unordered_map>
 
-struct Swapchain {
+struct SwapchainXR {
     XrSwapchain handle;
     int32_t width;
     int32_t height;
+};
+
+struct SwapchainImageXR {
+    XrSwapchainImageBaseHeader* image;
+    XrSwapchain handle;
+};
+
+struct FrameInfo {
+    XrFrameState frameState;
+    std::vector<XrCompositionLayerBaseHeader*> layers;
+    XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    std::vector<XrCompositionLayerProjectionView> projectionLayerViews;
+    std::vector<SwapchainImageXR> images;
+    XrViewState viewState{XR_TYPE_VIEW_STATE};
+    uint32_t viewCapacityInput;
+    uint32_t viewCountOutput;
+    XrViewLocateInfo viewLocateInfo{XR_TYPE_VIEW_LOCATE_INFO};
+    bool shouldRender = false;
 };
 
 class OpenXRLib {
@@ -216,7 +234,7 @@ class OpenXRLib {
                 swapchainCreateInfo.faceCount = 1;
                 swapchainCreateInfo.sampleCount = vp.recommendedSwapchainSampleCount;
                 swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-                Swapchain swapchain;
+                SwapchainXR swapchain;
                 swapchain.width = swapchainCreateInfo.width;
                 swapchain.height = swapchainCreateInfo.height;
                 CHECK_XRCMD(xrCreateSwapchain(m_session, &swapchainCreateInfo, &swapchain.handle));
@@ -337,7 +355,7 @@ class OpenXRLib {
         }
     }
 
-    bool IsSessionVisible() {
+    bool isSessionVisible() {
         switch (m_sessionState) {
             case XR_SESSION_STATE_VISIBLE:
             case XR_SESSION_STATE_FOCUSED:
@@ -367,26 +385,10 @@ class OpenXRLib {
 
             projectionLayerViews.resize(viewCountOutput);
 
-            // For each locatable space that we want to visualize, render a 25cm cube.
-            /*  std::vector<Cube> cubes;
-              for (XrSpace visualizedSpace : m_visualizedSpaces) {
-                  XrSpaceRelation spaceRelation{XR_TYPE_SPACE_RELATION};
-                  res = xrLocateSpace(visualizedSpace, m_appSpace, predictedDisplayTime, &spaceRelation);
-                  CHECK_XRRESULT(res, "xrLocateSpace");
-                  if (XR_UNQUALIFIED_SUCCESS(res)) {
-                      if ((spaceRelation.relationFlags & XR_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
-                          (spaceRelation.relationFlags & XR_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
-                          cubes.push_back(Cube{spaceRelation.pose, {0.25f, 0.25f, 0.25f}});
-                      }
-                  } else {
-                      Log::Write(Log::Level::Verbose, Fmt("Unable to relate a visualized space to app space: %d", res));
-                  }
-              }*/
-
             // Render view to the appropriate part of the swapchain image.
             for (uint32_t i = 0; i < viewCountOutput; i++) {
                 // Each view has a separate swapchain which is acquired, rendered to, and released.
-                const Swapchain viewSwapchain = m_swapchains[i];
+                const SwapchainXR viewSwapchain = m_swapchains[i];
 
                 XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
 
@@ -422,7 +424,7 @@ class OpenXRLib {
         }
     }
 
-    void renderFrame() {
+    XrFrameState syncWithCompositorAndBeginFrame() {
         CHECK(m_session != XR_NULL_HANDLE);
 
         XrFrameWaitInfo frameWaitInfo{XR_TYPE_FRAME_WAIT_INFO};
@@ -432,15 +434,10 @@ class OpenXRLib {
         XrFrameBeginInfo frameBeginInfo{XR_TYPE_FRAME_BEGIN_INFO};
         CHECK_XRCMD(xrBeginFrame(m_session, &frameBeginInfo));
 
-        std::vector<XrCompositionLayerBaseHeader*> layers;
-        XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-        std::vector<XrCompositionLayerProjectionView> projectionLayerViews;
-        if (IsSessionVisible()) {
-            if (RenderLayer(frameState.predictedDisplayTime, projectionLayerViews, layer)) {
-                layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer));
-            }
-        }
+        return frameState;
+    }
 
+    void endFrame(XrFrameState frameState, std::vector<XrCompositionLayerBaseHeader*>& layers) {
         XrFrameEndInfo frameEndInfo{XR_TYPE_FRAME_END_INFO};
         frameEndInfo.displayTime = frameState.predictedDisplayTime;
         frameEndInfo.environmentBlendMode = m_environmentBlendMode;
@@ -448,6 +445,78 @@ class OpenXRLib {
         frameEndInfo.layers = layers.data();
         CHECK_XRCMD(xrEndFrame(m_session, &frameEndInfo));
     }
+
+	void aquireImage(FrameInfo& frame, uint16_t i) {
+        // Each view has a separate swapchain which is acquired, rendered to, and released.
+        const SwapchainXR viewSwapchain = m_swapchains[i];
+        frame.images[i].handle = viewSwapchain.handle;
+
+        XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+
+        uint32_t swapchainImageIndex;
+        CHECK_XRCMD(xrAcquireSwapchainImage(viewSwapchain.handle, &acquireInfo, &swapchainImageIndex));
+
+        XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+        waitInfo.timeout = XR_INFINITE_DURATION;
+        CHECK_XRCMD(xrWaitSwapchainImage(viewSwapchain.handle, &waitInfo));
+
+        frame.projectionLayerViews[i] = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+        frame.projectionLayerViews[i].pose = m_views[i].pose;
+        frame.projectionLayerViews[i].fov = m_views[i].fov;
+        frame.projectionLayerViews[i].subImage.swapchain = viewSwapchain.handle;
+        frame.projectionLayerViews[i].subImage.imageRect.offset = {0, 0};
+        frame.projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width, viewSwapchain.height};
+        frame.images[i].image = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];       
+	}
+
+	void releaseImage(FrameInfo& frame, uint16_t i) {
+        XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        CHECK_XRCMD(xrReleaseSwapchainImage(frame.images[i].handle, &releaseInfo));
+	}
+
+	void frameRun(FrameInfo& frame) {
+        // Render view to the appropriate part of the swapchain image.
+        for (uint32_t i = 0; i < frame.viewCountOutput; i++) {
+            
+        }
+	}
+
+    FrameInfo aquireFrame() {
+       // auto rendered = true;
+        XrResult res;
+        FrameInfo frame;
+        frame.frameState = syncWithCompositorAndBeginFrame();
+        frame.viewCapacityInput = (uint32_t)m_views.size();
+        frame.viewLocateInfo.displayTime = frame.frameState.predictedDisplayTime;
+        frame.viewLocateInfo.space = m_appSpace;
+
+        res = xrLocateViews(m_session, &frame.viewLocateInfo, &frame.viewState, frame.viewCapacityInput, &frame.viewCountOutput,
+                            m_views.data());
+        CHECK_XRRESULT(res, "xrLocateViews");
+
+        frame.shouldRender = XR_UNQUALIFIED_SUCCESS(res) && isSessionVisible();
+        CHECK(frame.viewCountOutput == frame.viewCapacityInput);
+        CHECK(frame.viewCountOutput == m_configViews.size());
+        CHECK(frame.viewCountOutput == m_swapchains.size());
+
+        frame.projectionLayerViews.resize(frame.viewCountOutput);
+        frame.images.resize(frame.viewCountOutput);
+
+        
+        return std::move(frame);
+    }
+
+    void submitFrame(FrameInfo frame) { 
+		if (frame.shouldRender){
+            frame.layer.space = m_appSpace;
+            frame.layer.viewCount = (uint32_t)frame.projectionLayerViews.size();
+            frame.layer.views = frame.projectionLayerViews.data();
+
+			frame.layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&frame.layer));
+		} 
+
+		endFrame(frame.frameState, frame.layers);
+	}
 
     static std::string version() { return "1"; }
 
@@ -471,7 +540,7 @@ class OpenXRLib {
     XrSpace m_appSpace;
     XrEventDataBuffer m_eventDataBuffer;
     std::vector<XrSpace> m_visualizedSpaces;
-    std::vector<Swapchain> m_swapchains;
+    std::vector<SwapchainXR> m_swapchains;
     std::vector<XrViewConfigurationView> m_configViews;
     std::vector<XrView> m_views;
     int64_t m_colorSwapchainFormat{-1};
@@ -551,9 +620,8 @@ class OpenXRLib {
     void renderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
                     int64_t swapchainFormat) {
         if (swapchainFormat) {
-        
-		}
-		// Shared
+        }
+        // Shared
         CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
         ID3D11Texture2D* const colorTexture = reinterpret_cast<const XrSwapchainImageD3D11KHR*>(swapchainImage)->texture;
 
@@ -639,14 +707,14 @@ class OpenXRLib {
         bgfx::setViewFrameBuffer(view, frameBuffer);
         bgfx::touch(view);
 
-        //m_pt = 2;
-        //bgfx::IndexBufferHandle ibh = m_ibh[m_pt];
-        //uint64_t state = 0 | (m_r ? BGFX_STATE_WRITE_R : 0) | (m_g ? BGFX_STATE_WRITE_G : 0) | (m_b ? BGFX_STATE_WRITE_B : 0) |
+        // m_pt = 2;
+        // bgfx::IndexBufferHandle ibh = m_ibh[m_pt];
+        // uint64_t state = 0 | (m_r ? BGFX_STATE_WRITE_R : 0) | (m_g ? BGFX_STATE_WRITE_G : 0) | (m_b ? BGFX_STATE_WRITE_B : 0) |
         //                 (m_a ? BGFX_STATE_WRITE_A : 0) | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_CULL_CW |
         //                 BGFX_STATE_MSAA | s_ptState[m_pt];
 
         //// Submit 11x11 cubes.
-        //for (uint32_t yy = 0; yy < 11; ++yy) {
+        // for (uint32_t yy = 0; yy < 11; ++yy) {
         //    for (uint32_t xx = 0; xx < 11; ++xx) {
         //        float mtx[16];
         //        bx::mtxRotateXY(mtx, 0, 0);
@@ -670,12 +738,12 @@ class OpenXRLib {
         //}
 
         bgfx::frame();
-	}
+    }
 
     XrGraphicsBindingD3D11KHR m_graphicsBinding{XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
     std::list<std::vector<XrSwapchainImageD3D11KHR>> m_swapchainImageBuffers;
 
-	std::unordered_map<uintptr_t, bgfx::FrameBufferHandle> framebuffers;
+    std::unordered_map<uintptr_t, bgfx::FrameBufferHandle> framebuffers;
     std::unordered_map<uintptr_t, bgfx::TextureHandle> textures;
     uint16_t counter = 0;
 };
